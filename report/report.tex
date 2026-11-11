@@ -1,0 +1,143 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage{fontspec}
+\setmainfont{Times New Roman}
+\setmonofont{Consolas}[Scale=0.8]
+\usepackage[russian]{babel}
+\usepackage[left=30mm,right=15mm,top=20mm,bottom=20mm]{geometry}
+\usepackage{setspace}\onehalfspacing
+\usepackage{tikz}\usetikzlibrary{arrows.meta,positioning}
+\usepackage{listings,xcolor,float,hyperref}
+\hypersetup{hidelinks,breaklinks=true}
+\setlength{\parindent}{1.25cm}
+\emergencystretch=2em
+\definecolor{codegray}{RGB}{247,247,247}
+\lstset{language=C,basicstyle=\ttfamily\footnotesize\singlespacing,backgroundcolor=\color{codegray},breaklines=true,showstringspaces=false,frame=single,framesep=5pt,columns=fullflexible,keepspaces=true}
+\begin{document}
+\begin{titlepage}
+\begin{center}
+{\small МИНИСТЕРСТВО НАУКИ И ВЫСШЕГО ОБРАЗОВАНИЯ\\РОССИЙСКОЙ ФЕДЕРАЦИИ}\\[4mm]
+{\small Федеральное государственное автономное образовательное учреждение\\ высшего образования\\ «Московский авиационный институт (национальный исследовательский университет)»}
+\vfill
+{\bfseries\large ОТЧЁТ ПО ЛАБОРАТОРНОЙ РАБОТЕ № 4}\\[9mm]
+Дисциплина:\\[2mm]
+{\bfseries Операционные системы и архитектура компьютера}\\[6mm]
+Тема:\\[2mm]
+{\bfseries Межпроцессное взаимодействие с использованием разделяемой памяти}\\[3mm]
+Вариант 19
+\vfill
+\end{center}
+\begin{flushright}\begin{minipage}{0.45\textwidth}
+Выполнил:\\ студент группы М80-203БВ-25\\ Прудников Я. А.\par\vspace{7mm}
+Преподаватель:\\ Миронов Е. С.
+\end{minipage}\end{flushright}
+\vfill\begin{center}Москва, 2026 г.\end{center}
+\end{titlepage}
+\section{Цель работы}
+Изучить создание процессов и обмен данными между ними через отображаемую разделяемую память. Разработать программу на языке C, в которой родительский процесс распределяет строки между двумя дочерними процессами, а дочерние процессы обрабатывают строки и записывают результат в файлы.
+\section{Постановка задачи}
+Вариант 19 сохраняет условие лабораторной работы № 2: родительский процесс получает два имени выходных файлов, создаёт два дочерних процесса и передаёт каждому из них строки. Каждая строка с вероятностью 80\% направляется первому процессу и в остальных случаях -- второму. Дочерние процессы удаляют из строк гласные и записывают результат в соответствующий файл. В работе № 4 вместо каналов используется отображаемая память; системные ошибки необходимо обрабатывать.
+\section{Архитектура решения}
+В проекте родительская и дочерняя программы находятся в файлах \texttt{parent.c} и \texttt{child.c}. Общие функции чтения и обработки строк вынесены в \texttt{line\_utils.c}, а интерфейс работы с процессами и памятью -- в \texttt{os\_api.h}. Реализация для Linux находится в \texttt{platform/os\_linux.c}. Исходный код проекта: \url{https://github.com/yalama34/os-lab-3}.
+
+Родитель считывает имена файлов, проверяет, что они непустые и различаются, затем создаёт два объекта POSIX shared memory. Для каждого объекта выделяется собственный отображённый буфер. Через \texttt{fork()} создаётся процесс, в нём стандартный вывод перенаправляется в файл вызовом \texttt{dup2()}, после чего запускается программа \texttt{child} через \texttt{execvp()}. Имя объекта памяти передаётся ей аргументом. Родитель читает строки до конца ввода и выбирает адресата с помощью \texttt{rand() \% 100}: значения от 0 до 79 соответствуют первому процессу.
+
+Дочерний процесс открывает объект памяти, собирает переданную строку и удаляет символы \texttt{a, e, i, o, u, y} и их прописные варианты. Затем он записывает результат в стандартный вывод, который уже направлен в файл. Обработка кириллических гласных исходным кодом не предусмотрена.
+\subsection{Схема взаимодействия компонентов}
+\begin{figure}[H]\centering
+\begin{tikzpicture}[>=Stealth,node distance=8mm and 13mm, every node/.style={font=\small}, box/.style={draw,rounded corners,align=center,minimum width=36mm,minimum height=9mm,fill=black!3}]
+\node[box] (p) {Родитель\\ввод и выбор адресата};
+\node[box,below left=of p] (m1) {Память 1\\empty / full};
+\node[box,below right=of p] (m2) {Память 2\\empty / full};
+\node[box,below=of m1] (c1) {Дочерний процесс 1};
+\node[box,below=of m2] (c2) {Дочерний процесс 2};
+\node[box,below=of c1] (f1) {Файл 1};
+\node[box,below=of c2] (f2) {Файл 2};
+\draw[->] (p)--node[above left]{80\%} (m1); \draw[->] (p)--node[above right]{20\%} (m2);
+\draw[->] (m1)--(c1); \draw[->] (m2)--(c2); \draw[->] (c1)--(f1); \draw[->] (c2)--(f2);
+\end{tikzpicture}
+\caption{Обмен строками между процессами}
+\end{figure}
+\subsection{Организация обмена}
+Объект памяти создаётся через \texttt{shm\_open()} и \texttt{ftruncate()}, затем отображается вызовом \texttt{mmap()} с флагом \texttt{MAP\_SHARED}. В каждом буфере есть массив данных на 4096 байт, длина фрагмента, признаки последнего фрагмента и завершения передачи, а также два межпроцессных семафора. Семафор \texttt{empty} сначала равен единице, \texttt{full} -- нулю. Записывающий процесс ждёт освобождения буфера, помещает фрагмент и сигнализирует о готовности; читающий ждёт данные, копирует их и освобождает буфер. Строки длиннее 4096 байт передаются по частям и собираются в дочернем процессе.
+
+После конца ввода родитель отправляет каждому процессу сообщение с признаком завершения и вызывает \texttt{waitpid()}. Затем отображения и дескрипторы закрываются, а владелец удаляет объекты памяти и семафоры. В коде проверяются результаты основных системных вызовов; ожидание семафоров и процессов повторяется при прерывании сигналом \texttt{EINTR}.
+\section{Ключевые фрагменты кода}
+Ниже приведены фрагменты из исходных файлов проекта. Полные файлы доступны в репозитории.
+\clearpage
+\subsection{Создание отображения и семафоров}
+Объект общей памяти получает размер структуры буфера, после чего в нём создаются семафоры, доступные разным процессам.
+\begin{lstlisting}
+new_memory->fd = shm_open(name, O_CREAT | O_EXCL | O_RDWR, 0600);
+ftruncate(new_memory->fd, sizeof(shared_buffer));
+void *mapping = mmap(NULL, sizeof(shared_buffer),
+    PROT_READ | PROT_WRITE, MAP_SHARED, new_memory->fd, 0);
+new_memory->buffer = mapping;
+sem_init(&new_memory->buffer->empty, 1, 1);
+sem_init(&new_memory->buffer->full, 1, 0);
+\end{lstlisting}
+\begin{center}\small Листинг 1 -- Инициализация общей памяти (проверки ошибок опущены)\end{center}
+\subsection{Передача фрагмента строки}
+Отправитель дожидается свободного буфера и сообщает получателю о появлении данных. Признак \texttt{is\_last} позволяет получателю определить конец строки.
+\begin{lstlisting}
+size_t part = length - offset;
+if (part > BUFFER_SIZE) {
+    part = BUFFER_SIZE;
+}
+if (wait_semaphore(&buffer->empty) == -1) {
+    perror("sem_wait(empty)");
+    return -1;
+}
+buffer->length = part;
+buffer->is_last = (offset + part == length);
+buffer->finished = 0;
+if (part > 0) {
+    memcpy(buffer->data, data + offset, part);
+}
+if (sem_post(&buffer->full) == -1) {
+    perror("sem_post(full)");
+    return -1;
+}
+offset += part;
+\end{lstlisting}
+\begin{center}\small Листинг 2 -- Запись одного фрагмента строки\end{center}
+\clearpage
+\subsection{Распределение и обработка строк}
+В родительском процессе выбор получателя выполняется для каждой прочитанной строки.
+\begin{lstlisting}
+int choice = rand() % 100;
+if (choice < 80) {
+    os_shm_write(memory1, line, length);
+} else {
+    os_shm_write(memory2, line, length);
+}
+\end{lstlisting}
+\begin{center}\small Листинг 3 -- Выбор дочернего процесса (проверки ошибок опущены)\end{center}
+
+Дочерняя программа читает строку из своего объекта памяти, удаляет гласные функцией \texttt{remove\_vowels()} и пишет оставшиеся символы в файл через стандартный вывод.
+\begin{lstlisting}
+int result = os_shm_read(memory, &line, &length);
+remove_vowels(line);
+if (fputs(line, stdout) == EOF) {
+    free(line);
+    os_shm_destroy(memory);
+    return 1;
+}
+free(line);
+\end{lstlisting}
+\begin{center}\small Листинг 4 -- Обработка строки дочерним процессом\end{center}
+\section{Состояние реализации и проверка}
+При анализе исходных файлов обнаружены несогласованные объявления интерфейса: в \texttt{os\_api.h} третий аргумент \texttt{os\_shm\_read} объявлен как \texttt{size\_t}, тогда как реализация и вызов используют \texttt{size\_t *}; второй аргумент \texttt{os\_shm\_write} объявлен как \texttt{const void *}, а в определении -- как \texttt{const char *}. Кроме того, заголовок объявляет \texttt{os\_destroy\_shm}, тогда как реализация и вызывающий код используют \texttt{os\_shm\_destroy}. Эти расхождения необходимо исправить перед сборкой.
+
+Проверка запуска и получение журналов процессов не выполнены: доступная среда WSL вернула системную ошибку при запуске. Поэтому фактический консольный вывод, идентификаторы процессов и содержимое результирующих файлов в отчёте не приводятся. В проекте также нет сценария сборки или сохранённых результатов тестов. Распределение 80/20 описывает правило выбора для отдельных строк; точное соотношение в конечной выборке не гарантируется. При аварийном завершении дочернего процесса ожидание семафора родителем может остаться заблокированным.
+\section{Выводы}
+В проекте подготовлена реализация обмена строками между родительским и двумя дочерними процессами через отображаемую POSIX-память. Передача строк разделена на фрагменты, доступ к буферам синхронизируется семафорами, а результат дочерних процессов направляется в отдельные файлы. В ходе работы изучены принципы отображения памяти с помощью вызова \texttt{mmap()}, синхронизации процессов семафорами и передачи данных через общий буфер.
+\end{document}
+
+
+
+
+
+
+
+
+
