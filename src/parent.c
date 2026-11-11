@@ -2,21 +2,20 @@
 #include "include/os_api.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 #include <stdbool.h>
 
-//TODO одинаковые имена файлов
-
-int cleanup(os_pipe *pipe1, os_pipe *pipe2, os_process *process1, os_process *process2, char* file1, char* file2) {
+int cleanup(os_shared_memory *memory1, os_shared_memory *memory2, os_process *process1, os_process *process2, char* file1, char* file2) {
     int result = 0;
     int exit_code = 0;
-    if (pipe1 != NULL) {
-        if (os_pipe_close_writer(pipe1) != 0) {
+    if (memory1 != NULL) {
+        if (os_shm_close_writer(memory1) != 0) {
             result = 1;
         }
     }
-    if (pipe2 != NULL) {
-        if (os_pipe_close_writer(pipe2) != 0) {
+    if (memory2 != NULL) {
+        if (os_shm_close_writer(memory2) != 0) {
             result = 1;
         }
     }
@@ -38,8 +37,8 @@ int cleanup(os_pipe *pipe1, os_pipe *pipe2, os_process *process1, os_process *pr
     free(file1);
     free(file2);
 
-    os_destroy_pipe(pipe1);
-    os_destroy_pipe(pipe2);
+    os_shm_destroy(memory1);
+    os_shm_destroy(memory2);
 
     os_destroy_process(process1);
     os_destroy_process(process2);
@@ -73,33 +72,32 @@ int main(){
         file2[file2_len] = '\0';
     }
 
-    if (file1_len == 0 || file2_len == 0) {
+    if (file1_len == 0 || file2_len == 0 || strcmp(file1, file2) == 0) {
         free(file1);
         free(file2);
         return 1;
     }
 
-    os_pipe *pipe1 = NULL;
-    os_pipe *pipe2 = NULL;
+    os_shared_memory *memory1 = NULL;
+    os_shared_memory *memory2 = NULL;
     os_process *process_1 = NULL;
     os_process *process_2 = NULL;
 
-    if (os_create_pipe(&pipe1) != 0){
-        cleanup(pipe1, pipe2, process_1, process_2, file1, file2);
+    if (os_shm_create(&memory1) != 0){
+        cleanup(memory1, memory2, process_1, process_2, file1, file2);
         return 1;
     }
-    if (os_create_pipe(&pipe2) != 0){
-        cleanup(pipe1, pipe2, process_1, process_2, file1, file2);
+    if (os_shm_create(&memory2) != 0){
+        cleanup(memory1, memory2, process_1, process_2, file1, file2);
         return 1;
     }
 
-
-    if (os_create_process(&process_1, "./child", pipe1, file1) != 0) {
-        cleanup(pipe1, pipe2, process_1, process_2, file1, file2);
+    if (os_create_process(&process_1, "./child", memory1, file1) != 0) {
+        cleanup(memory1, memory2, process_1, process_2, file1, file2);
         return 1;
     }
-    if (os_create_process(&process_2, "./child", pipe2, file2) != 0) {
-        cleanup(pipe1, pipe2, process_1, process_2, file1, file2);
+    if (os_create_process(&process_2, "./child", memory2, file2) != 0) {
+        cleanup(memory1, memory2, process_1, process_2, file1, file2);
         return 1;
     }
 
@@ -112,27 +110,27 @@ int main(){
             break;
         }
         if (result == -1){
-            cleanup(pipe1, pipe2, process_1, process_2, file1, file2);
+            cleanup(memory1, memory2, process_1, process_2, file1, file2);
             free(line);
             return 1;
         }
         int choice = rand() % 100;
         if (choice < 80) {
-            if (os_pipe_write(pipe1, line, length) < 0){
-                cleanup(pipe1, pipe2, process_1, process_2, file1, file2);
+            if (os_shm_write(memory1, line, length) < 0){
+                cleanup(memory1, memory2, process_1, process_2, file1, file2);
                 free(line);
                 return 1;
             }
             free(line);
         } else {
-            if (os_pipe_write(pipe2, line, length) < 0){
-                cleanup(pipe1, pipe2, process_1, process_2, file1, file2);
+            if (os_shm_write(memory2, line, length) < 0){
+                cleanup(memory1, memory2, process_1, process_2, file1, file2);
                 free(line);
                 return 1;
             }
             free(line);
         }
     }
-    int result = cleanup(pipe1, pipe2, process_1, process_2, file1, file2);
+    int result = cleanup(memory1, memory2, process_1, process_2, file1, file2);
     return result;
 }
